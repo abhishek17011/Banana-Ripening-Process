@@ -13,6 +13,7 @@ from src.prediction import predict_ripeness
 from src.banana_validator import validate_banana_image
 from src.input_utils import normalize_image_input
 from src import config
+from src.evaluation import CLASS_NAMES, evaluate_dataset
 
 TRANSLATIONS = {
     "en": {
@@ -107,9 +108,27 @@ TRANSLATIONS["mr"].update({
 })
 TRANSLATIONS["en"].update({
     "segmentation_uncertain": "⚠️ Banana segmentation is uncertain. Please upload a clearer image."
+    ,"evaluation_title": "Image Processing Classification Evaluation", "evaluate_dataset": "Evaluate labeled dataset",
+    "evaluation_help": "Uses the existing black/brown spot rule on the natural and chemical/artificial folders.",
+    "evaluation_path": "Dataset location", "evaluation_missing": "Confusion Matrix requires a labeled evaluation dataset.",
+    "evaluation_empty": "No valid labeled images were found in the Natural and Chemical/Artificial folders.",
+    "evaluation_running": "Evaluating labeled images...", "evaluation_total": "Total Images",
+    "evaluation_correct": "Correct Predictions", "evaluation_incorrect": "Incorrect Predictions",
+    "evaluation_accuracy": "Accuracy", "evaluation_precision": "Precision", "evaluation_recall": "Recall",
+    "evaluation_f1": "F1-score", "evaluation_confusion": "Confusion Matrix", "evaluation_actual": "Actual",
+    "evaluation_predicted": "Predicted", "evaluation_skipped": "images skipped due to invalid or unsupported files.",
 })
 TRANSLATIONS["mr"].update({
     "segmentation_uncertain": "⚠️ केळीचे विभाजन अनिश्चित आहे. कृपया अधिक स्पष्ट फोटो अपलोड करा."
+    ,"evaluation_title": "प्रतिमा प्रक्रिया वर्गीकरणाचे मूल्यमापन", "evaluate_dataset": "लेबल असलेल्या डेटासेटचे मूल्यमापन करा",
+    "evaluation_help": "नैसर्गिक आणि रासायनिक/कृत्रिम फोल्डरवर विद्यमान काळे/तपकिरी डाग नियम वापरला जातो.",
+    "evaluation_path": "डेटासेटचे स्थान", "evaluation_missing": "गोंधळ मॅट्रिक्ससाठी लेबल असलेला मूल्यमापन डेटासेट आवश्यक आहे.",
+    "evaluation_empty": "नैसर्गिक आणि रासायनिक/कृत्रिम फोल्डरमध्ये वैध लेबल असलेल्या प्रतिमा आढळल्या नाहीत.",
+    "evaluation_running": "लेबल असलेल्या प्रतिमांचे मूल्यमापन सुरू आहे...", "evaluation_total": "एकूण प्रतिमा",
+    "evaluation_correct": "अचूक अंदाज", "evaluation_incorrect": "चुकीचे अंदाज", "evaluation_accuracy": "अचूकता",
+    "evaluation_precision": "प्रिसिजन", "evaluation_recall": "रिकॉल", "evaluation_f1": "F1-स्कोअर",
+    "evaluation_confusion": "गोंधळ मॅट्रिक्स", "evaluation_actual": "प्रत्यक्ष", "evaluation_predicted": "अंदाजित",
+    "evaluation_skipped": "अवैध किंवा असमर्थित फाइल्समुळे प्रतिमा वगळल्या.",
 })
 
 if "language" not in st.session_state:
@@ -134,6 +153,67 @@ def display_table(data):
         use_container_width=True,
     )
 
+
+def render_dataset_evaluation():
+    st.divider()
+    st.markdown(f"## {t('evaluation_title')}")
+    st.caption(t("evaluation_help"))
+    dataset_dir = Path(__file__).resolve().parent / "dataset"
+    st.caption(f"{t('evaluation_path')}: {dataset_dir}")
+    if st.button(t("evaluate_dataset"), type="secondary"):
+        progress = st.progress(0, text=t("evaluation_running"))
+
+        def update_progress(current, total):
+            progress.progress(current / total if total else 0, text=f"{t('evaluation_running')} {current}/{total}")
+
+        with st.spinner(t("evaluation_running")):
+            st.session_state.dataset_evaluation = evaluate_dataset(dataset_dir, update_progress)
+        progress.empty()
+
+    evaluation = st.session_state.get("dataset_evaluation")
+    if not evaluation:
+        return
+    if not evaluation["available"]:
+        if evaluation.get("missing_classes"):
+            st.info(t("evaluation_missing"))
+        else:
+            st.info(t("evaluation_empty"))
+        return
+
+    st.markdown(f"### {t('evaluation_confusion')}")
+    matrix = evaluation["confusion_matrix"]
+    labels = [t("natural_short"), t("chemical_short")]
+    figure, axis = plt.subplots(figsize=(6.2, 4.5))
+    image = axis.imshow(matrix, cmap="YlGn", vmin=0)
+    figure.colorbar(image, ax=axis, fraction=.046, pad=.04, label="Images")
+    axis.set_xticks(range(len(labels)), labels=labels)
+    axis.set_yticks(range(len(labels)), labels=labels)
+    axis.set_xlabel(t("evaluation_predicted"))
+    axis.set_ylabel(t("evaluation_actual"))
+    axis.set_title(t("evaluation_confusion"))
+    for row in range(matrix.shape[0]):
+        for column in range(matrix.shape[1]):
+            axis.text(column, row, str(matrix[row, column]), ha="center", va="center", color="#10291b", fontweight="bold")
+    figure.tight_layout()
+    st.pyplot(figure, use_container_width=False)
+    plt.close(figure)
+
+    metric_columns = st.columns(7)
+    metrics = [
+        (t("evaluation_total"), evaluation["total_images"]),
+        (t("evaluation_correct"), evaluation["correct_predictions"]),
+        (t("evaluation_incorrect"), evaluation["incorrect_predictions"]),
+        (t("evaluation_accuracy"), f'{evaluation["accuracy"] * 100:.2f}%'),
+        (t("evaluation_precision"), f'{evaluation["precision"] * 100:.2f}%'),
+        (t("evaluation_recall"), f'{evaluation["recall"] * 100:.2f}%'),
+        (t("evaluation_f1"), f'{evaluation["f1"] * 100:.2f}%'),
+    ]
+    for column, (label, value) in zip(metric_columns, metrics):
+        with column:
+            st.metric(label, value)
+    if evaluation["skipped"]:
+        st.warning(f'{len(evaluation["skipped"])} {t("evaluation_skipped")}')
+
 def localized_result(result):
     if st.session_state.language == "en":
         return result
@@ -150,6 +230,7 @@ def localized_validation_message(message):
     return t(message_keys[message]) if message in message_keys else message
 
 st.set_page_config(page_title=t("page_title"), page_icon="", layout="wide")
+st.markdown('<link rel="manifest" href="/app/static/manifest.json">', unsafe_allow_html=True)
 st.markdown("""<style>
  .stApp { background: #f8f6ed; color: #12271b; }
  h1 { color:#10291b; font-weight:800; letter-spacing:-.04em; font-size:2.35rem; }
@@ -376,3 +457,5 @@ if analysis:
     display_table({t("parameter"): [t("filename"), t("dimensions"), t("banana_detected_label")], t("value"): [analysis["filename"], f'{format_count(analysis["dimensions"][0])} × {format_count(analysis["dimensions"][1])} px', t("yes")]})
     st.markdown(f"### {t('classification')}")
     display_table({t("parameter"): [t("classification"), t("spot_coverage"), t("threshold"), t("spot_count")], t("value"): [result_title, f"{format_number(spot_coverage)}%", f"{format_number(threshold)}%", format_count(analysis["spot_count"])]})
+
+render_dataset_evaluation()
