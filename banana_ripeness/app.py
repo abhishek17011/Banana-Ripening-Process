@@ -6,13 +6,14 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from src.image_processing import load_image, rgb
-from src.ripeness_classifier import STAGES
-from src.features import extract_features_from_image
-from src.prediction import load_model, predict_ripeness_from_features
+from src.image_processing import load_image, process_image, rgb
+from src.color_analysis import analyze_colors
+from src.ripeness_classifier import STAGES, classify
+from src.prediction import predict_ripeness
 from src.banana_validator import validate_banana_image
 from src.input_utils import normalize_image_input
 from src import config
+from src.evaluation import CLASS_NAMES, evaluate_dataset
 
 TRANSLATIONS = {
     "en": {
@@ -31,16 +32,16 @@ TRANSLATIONS = {
         "step_hsv": "BGR → HSV conversion", "step_segment": "Simple banana segmentation",
         "step_color": "Green, yellow & brown analysis", "step_classify": "Ripening method classification",
         "local_processing": "All processing happens locally in this Streamlit session. This is an image-based classification.",
-        "ripening_method": "RIPENING METHOD", "unavailable": "Unavailable", "no_model": "Classification model is not available. Please train the model using properly labelled Natural and Chemical banana images.",
+        "ripening_method": "RIPENING METHOD", "unavailable": "Unavailable", "no_model": "No trained three-class model is available. This result is an image-based estimate without model confidence.",
         "class": "Class", "model_confidence": "Model Confidence", "fruit_coverage": "FRUIT COVERAGE",
         "probability": "Probability (%)", "green_area": "GREEN AREA", "yellow_area": "YELLOW AREA",
         "brown_area": "BROWN AREA", "brown_spot_area": "BROWN SPOT AREA", "recommendation": "Recommendation",
-        "disclaimer": "This system provides an image-based estimation of banana ripening characteristics. Visual image analysis alone cannot scientifically confirm whether a banana was ripened using chemicals. Laboratory testing or validated experimental ground truth is required for confirmation.",
+        "disclaimer": "Classification is based on image/spectral features and should not be considered a definitive chemical or food-safety test.",
         "visualization": "Image Processing Visualization", "original": "1. Original Image",
         "color_mask": "3. Color Mask (green / yellow / brown)", "hsv_image": "2. HSV Processed Image",
         "brown_mask": "4. Brown Area Mask", "composition": "Banana Color Composition", "colour_class": "Colour class", "area": "Area (%)",
-        "green": "Green", "yellow": "Yellow", "brown": "Brown", "dark": "Black / Dark", "banana_detected": "🍌 Banana detected",
-        "multiple_bananas": "🍌 Multiple bananas detected ({count})", "no_banana": "Banana not detected. Please upload a clear banana image.",
+        "green": "Green", "yellow": "Yellow", "brown": "Brown", "dark": "Dark", "banana_detected": "🍌 Banana detected",
+        "multiple_bananas": "🍌 Multiple bananas detected ({count})", "no_banana": "⚠️ No banana detected",
         "quality_low": "⚠️ Image quality is too low", "ready_analysis": "ready for ripeness analysis.",
         "stage_green": "GREEN / UNRIPE", "stage_natural": "NATURALLY RIPENED", "stage_chemical": "CHEMICALLY RIPENED",
         "desc_green": "Banana appears to be unripe based on the analyzed image features.",
@@ -133,33 +134,6 @@ TRANSLATIONS["mr"].update({
     "ground_truth_required": "वैध confusion-matrix मेट्रिक्ससाठी स्वतंत्र ground-truth लेबल आवश्यक आहेत.",
     "pseudo_labeled_notice": "ही लेबले अंदाजासाठी वापरलेल्या त्याच threshold नियमाने तयार केली आहेत. हा confusion matrix कामगिरीचे मूल्यमापन नाही; वैध मूल्यमापनासाठी स्वतंत्र ground-truth लेबले आवश्यक आहेत.",
 })
-TRANSLATIONS["en"].update({
-    "banana_analysis": "Banana Analysis", "banana_not_detected": "Banana not detected. Please upload a clear banana image.",
-    "final_result": "Final Result", "prediction_confidence": "Prediction Confidence",
-    "mean_hue": "Mean Hue", "mean_saturation": "Mean Saturation", "mean_brightness": "Mean Brightness",
-    "green_percent": "Green %", "yellow_percent": "Yellow %", "brown_percent": "Brown %", "black_percent": "Black %",
-    "spot_percent": "Spot %", "number_spots": "Number of spots", "average_spot_size": "Average spot size",
-    "color_variance": "Color percentage variance", "regional_variation": "Regional color variation",
-    "hsv_std": "HSV standard deviation", "hsv_distribution": "HSV Distribution",
-    "spot_distribution": "Spot distribution by region", "region_1": "Upper left", "region_2": "Upper right",
-    "region_3": "Lower left", "region_4": "Lower right", "evaluation_title": "Held-Out Test Evaluation",
-    "evaluation_missing": "No saved held-out test results are available. Train the model on properly labeled images first.",
-})
-TRANSLATIONS["mr"].update({
-    "no_model": "वर्गीकरण मॉडेल उपलब्ध नाही. योग्य लेबल असलेल्या नैसर्गिक आणि रासायनिक केळीच्या प्रतिमांनी मॉडेल प्रशिक्षित करा.",
-    "disclaimer": "ही प्रणाली केळीच्या पिकण्याच्या वैशिष्ट्यांचा प्रतिमेवर आधारित अंदाज देते. केवळ दृश्य विश्लेषणाने रासायनिक पद्धतीने पिकवले आहे याची वैज्ञानिक पुष्टी होत नाही. पुष्टीसाठी प्रयोगशाळा चाचणी किंवा प्रमाणित प्रायोगिक ground truth आवश्यक आहे.",
-    "banana_analysis": "केळीचे विश्लेषण", "banana_not_detected": "केळी आढळले नाही. कृपया केळीची स्पष्ट प्रतिमा अपलोड करा.",
-    "final_result": "अंतिम निकाल", "prediction_confidence": "अंदाजाची विश्वास पातळी",
-    "mean_hue": "सरासरी Hue", "mean_saturation": "सरासरी Saturation", "mean_brightness": "सरासरी Brightness",
-    "green_percent": "हिरवा %", "yellow_percent": "पिवळा %", "brown_percent": "तपकिरी %", "black_percent": "काळा %",
-    "spot_percent": "डाग %", "number_spots": "डागांची संख्या", "average_spot_size": "डागाचा सरासरी आकार",
-    "color_variance": "रंग टक्केवारीतील विचलन", "regional_variation": "विभागनिहाय रंग बदल",
-    "hsv_std": "HSV प्रमाणित विचलन", "hsv_distribution": "HSV वितरण",
-    "spot_distribution": "विभागनिहाय डागांचे वितरण", "region_1": "वरचा डावा", "region_2": "वरचा उजवा",
-    "region_3": "खालचा डावा", "region_4": "खालचा उजवा", "evaluation_title": "स्वतंत्र चाचणी संचाचे मूल्यमापन",
-    "evaluation_missing": "स्वतंत्र चाचणी संचाचे निकाल उपलब्ध नाहीत. प्रथम योग्य लेबल असलेल्या प्रतिमांनी मॉडेल प्रशिक्षित करा.",
-})
-
 if "language" not in st.session_state:
     st.session_state.language = "en"
 
@@ -186,25 +160,67 @@ def display_table(data):
 def render_dataset_evaluation():
     st.divider()
     st.markdown(f"## {t('evaluation_title')}")
-    model_bundle = load_model()
-    metrics = model_bundle.get("test_metrics") if model_bundle else None
-    output_dir = Path(__file__).resolve().parent / "outputs"
-    report_path = output_dir / "classification_report.txt"
-    confusion_path = output_dir / "confusion_matrix.png"
-    if not metrics or not report_path.is_file() or not confusion_path.is_file():
-        st.info(t("evaluation_missing"))
+    st.caption(t("evaluation_help"))
+    dataset_dir = Path(__file__).resolve().parent / "evaluation_dataset_pseudo_labeled"
+    st.caption(f"{t('evaluation_path')}: {dataset_dir}")
+    if st.button(t("evaluate_dataset"), type="secondary"):
+        progress = st.progress(0, text=t("evaluation_running"))
+
+        def update_progress(current, total):
+            progress.progress(current / total if total else 0, text=f"{t('evaluation_running')} {current}/{total}")
+
+        with st.spinner(t("evaluation_running")):
+            st.session_state.dataset_evaluation = evaluate_dataset(dataset_dir, update_progress)
+        progress.empty()
+
+    evaluation = st.session_state.get("dataset_evaluation")
+    if not evaluation:
+        return
+    if not evaluation["available"]:
+        if evaluation.get("missing_classes"):
+            st.info(t("evaluation_missing"))
+        else:
+            st.info(t("evaluation_empty"))
         return
 
-    columns = st.columns(4)
-    for column, label, key in zip(
-        columns,
-        (t("evaluation_accuracy"), t("evaluation_precision"), t("evaluation_recall"), t("evaluation_f1")),
-        ("Accuracy", "Precision", "Recall", "F1 Score"),
-    ):
-        with column:
-            st.metric(label, f'{float(metrics[key]) * 100:.2f}%')
-    st.image(str(confusion_path), caption=t("evaluation_confusion"), use_container_width=True)
-    st.code(report_path.read_text(encoding="utf-8"), language="text")
+    st.markdown(f"### {t('evaluation_confusion')}")
+    matrix = evaluation["confusion_matrix"]
+    labels = [t("natural_short"), t("chemical_short")]
+    figure, axis = plt.subplots(figsize=(6.2, 4.5))
+    image = axis.imshow(matrix, cmap="YlGn", vmin=0)
+    figure.colorbar(image, ax=axis, fraction=.046, pad=.04, label="Images")
+    axis.set_xticks(range(len(labels)), labels=labels)
+    axis.set_yticks(range(len(labels)), labels=labels)
+    axis.set_xlabel(t("evaluation_predicted"))
+    axis.set_ylabel(t("evaluation_actual"))
+    axis.set_title(t("evaluation_confusion"))
+    for row in range(matrix.shape[0]):
+        for column in range(matrix.shape[1]):
+            axis.text(column, row, str(matrix[row, column]), ha="center", va="center", color="#10291b", fontweight="bold")
+    figure.tight_layout()
+    st.pyplot(figure, use_container_width=False)
+    plt.close(figure)
+
+    if evaluation.get("pseudo_labeled"):
+        st.warning(t("ground_truth_required"))
+        st.info(t("pseudo_labeled_notice"))
+
+    if evaluation.get("metrics_valid"):
+        metric_columns = st.columns(7)
+        metrics = [
+            (t("evaluation_total"), evaluation["total_images"]),
+            (t("evaluation_correct"), evaluation["correct_predictions"]),
+            (t("evaluation_incorrect"), evaluation["incorrect_predictions"]),
+            (t("evaluation_accuracy"), f'{evaluation["accuracy"] * 100:.2f}%'),
+            (t("evaluation_precision"), f'{evaluation["precision"] * 100:.2f}%'),
+            (t("evaluation_recall"), f'{evaluation["recall"] * 100:.2f}%'),
+            (t("evaluation_f1"), f'{evaluation["f1"] * 100:.2f}%'),
+        ]
+        for column, (label, value) in zip(metric_columns, metrics):
+            with column:
+                st.metric(label, value)
+    if evaluation["skipped"]:
+        st.warning(f'{len(evaluation["skipped"])} {t("evaluation_skipped")}')
 
 def localized_result(result):
     if st.session_state.language == "en":
@@ -245,9 +261,12 @@ def stage_indicator(active: int):
     st.markdown(f'<div class="stage">{cells}</div>', unsafe_allow_html=True)
 
 def run_analysis(image, filename):
-    features, colors, processed = extract_features_from_image(image)
-    result = predict_ripeness_from_features(features)
-    st.session_state.analysis = {**processed, **colors, "features": features, "result": result, "filename": filename, "dimensions": (image.shape[1], image.shape[0])}
+    processed = process_image(image)
+    colors = analyze_colors(processed["hsv"], processed["banana_mask"], processed["working"], processed["lab"])
+    spot_coverage = float(colors.get("brown_spot_percentage", 0.0))
+    is_natural = spot_coverage >= config.NATURAL_SPOT_THRESHOLD
+    result = {"classification": "natural" if is_natural else "chemical", "spot_coverage": spot_coverage}
+    st.session_state.analysis = {**processed, **colors, "result": result, "filename": filename, "dimensions": (image.shape[1], image.shape[0])}
 
 
 def render_image_input(image, filename, source_label):
@@ -382,83 +401,46 @@ if analysis and False:  # Legacy result presentation retained but superseded by 
     st.dataframe(pd.DataFrame({t("colour_class"): [t("green"), t("yellow"), t("brown"), t("dark")], t("area"): [analysis["green"], analysis["yellow"], analysis["brown"], analysis["dark"]]}), hide_index=True, use_container_width=True)
 
 if analysis:
-    result = analysis["result"]
-    natural = result is not None and result["classification"] == "natural"
+    natural = analysis["result"]["classification"] == "natural"
     spot_coverage = float(analysis["brown_spot_percentage"])
-    result_title = t("natural_result" if natural else "chemical_result") if result else t("not_available")
+    threshold = float(config.NATURAL_SPOT_THRESHOLD)
+    result_title = t("natural_result" if natural else "chemical_result")
+    result_short = t("natural_short" if natural else "chemical_short")
+    status = t("above_threshold" if natural else "below_threshold")
+    icon = "🍌" if natural else "🧪"
 
     st.divider()
-    st.markdown(f"## {t('banana_analysis')}")
-    display_table({
-        t("parameter"): [
-            t("banana_detected_label"), t("mean_hue"), t("mean_saturation"), t("mean_brightness"),
-            t("green_percent"), t("yellow_percent"), t("brown_percent"), t("black_percent"),
-            t("spot_percent"), t("number_spots"), t("average_spot_size"),
-        ],
-        t("value"): [
-            t("yes"), format_number(analysis["mean_H"]), format_number(analysis["mean_S"]),
-            format_number(analysis["mean_V"]), f'{format_number(analysis["green"])}%',
-            f'{format_number(analysis["yellow"])}%', f'{format_number(analysis["brown"])}%',
-            f'{format_number(analysis["dark"])}%', f'{format_number(spot_coverage)}%',
-            format_count(analysis["spot_count"]), f'{format_number(analysis["average_spot_area"])} {t("pixels")}',
-        ],
-    })
-    st.markdown(f"### {t('final_result')}")
-    if result is None:
-        st.warning(t("no_model"))
-    else:
-        confidence_percent = float(result["confidence"]) * 100
-        st.markdown(f'<div class="card"><h2>{result_title}</h2><p>{result["description"]}</p><p class="disclaimer">{result["mode"]}</p></div>', unsafe_allow_html=True)
-        st.metric(t("prediction_confidence"), f"{confidence_percent:.1f}%")
+    st.markdown(f"## {t('ripening_method')}")
+    st.markdown(f'<div class="card"><h2>{icon} {result_title}</h2><p><b>{t("classification")}:</b> {result_short}</p><p class="disclaimer">{t("local_processing")}</p></div>', unsafe_allow_html=True)
     if analysis.get("segmentation_uncertain"):
         st.warning(t("segmentation_uncertain"))
+    summary = st.columns(4)
+    for col, label, value in zip(summary, [t("spot_coverage"), t("spot_count"), t("threshold"), t("status")], [f"{format_number(spot_coverage)}%", format_count(analysis["spot_count"]), f"{format_number(threshold)}%", status]):
+        with col:
+            st.markdown(f'<div class="metric-card"><small>{label}</small><h3>{value}</h3></div>', unsafe_allow_html=True)
     st.markdown(f'<p class="disclaimer">{t("disclaimer")}</p>', unsafe_allow_html=True)
 
     st.markdown(f"### {t('visualization')}")
     v1, v2 = st.columns(2)
     with v1:
         st.image(rgb(analysis["original"]), caption=t("original"), use_container_width=True)
-        st.image(analysis["hsv_visual"], caption=t("hsv_image"), use_container_width=True)
+        st.image(analysis["color_mask"], channels="BGR", caption=t("color_mask"), use_container_width=True)
     with v2:
-        st.image(analysis["segmented"], channels="BGR", caption=t("segmentation"), use_container_width=True)
-        st.image(analysis["brown_spot_mask"], caption=f'{t("detected_spots")} — {t("spot_coverage")}: {format_number(spot_coverage)}%', use_container_width=True)
+        st.image(analysis["hsv_visual"], caption=t("hsv_image"), use_container_width=True)
+        st.image(analysis["brown_mask"], caption=t("brown_mask"), use_container_width=True)
 
     st.markdown(f"### {t('composition')}")
-    fig, ax = plt.subplots(figsize=(6.4, 4.5))
-    values = [analysis["green"], analysis["yellow"], analysis["brown"], analysis["dark"]]
-    labels = [t("green"), t("yellow"), t("brown"), t("dark")]
-    wedges, _, _ = ax.pie(values, colors=["#5B9A68", "#E4B843", "#9A5B3B", "#30343B"], autopct="%1.2f%%", pctdistance=.76, startangle=90, wedgeprops={"width": .46, "edgecolor": "white", "linewidth": 1.25}, textprops={"fontsize": 10, "fontweight": "medium"})
+    fig, ax = plt.subplots(figsize=(4.8, 3.4))
+    values = [analysis["green"], analysis["yellow"], analysis["brown"]]
+    ax.pie(values, labels=[t("green"), t("yellow"), t("brown")], colors=["#4fa65a", "#f5cb21", "#905631"], autopct="%1.1f%%", startangle=90, wedgeprops={"width": .46, "edgecolor": "white"})
     ax.set(aspect="equal")
-    ax.legend(wedges, labels, loc="lower center", bbox_to_anchor=(.5, -.15), ncol=2, frameon=False, fontsize=10)
-    fig.subplots_adjust(bottom=.2)
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
-    display_table({t("colour_class"): labels, t("area"): [f"{format_number(value)}%" for value in values]})
-
-    st.markdown(f"### {t('hsv_distribution')}")
-    distribution_figure, distribution_axis = plt.subplots(figsize=(7.2, 3.8))
-    for channel_name, channel, bin_count, upper, color in (
-        ("Hue", analysis["hsv"][:, :, 0], 8, 180, "#27834a"),
-        ("Saturation", analysis["hsv"][:, :, 1], 4, 256, "#d19a16"),
-        ("Brightness", analysis["hsv"][:, :, 2], 4, 256, "#76523c"),
-    ):
-        histogram = cv2.calcHist([channel], [0], analysis["banana_mask"], [bin_count], [0, upper]).flatten()
-        histogram = histogram * (100.0 / max(1, analysis["fruit_area"]))
-        distribution_axis.plot(range(bin_count), histogram, marker="o", label=channel_name, color=color)
-    distribution_axis.set_ylabel("Banana area (%)")
-    distribution_axis.set_xlabel("Normalized HSV bin")
-    distribution_axis.legend(frameon=False, ncol=3)
-    distribution_axis.grid(axis="y", alpha=.2)
-    distribution_figure.tight_layout()
-    st.pyplot(distribution_figure, use_container_width=True)
-    plt.close(distribution_figure)
+    st.pyplot(fig, use_container_width=False)
+    st.dataframe(pd.DataFrame({t("colour_class"): [t("green"), t("yellow"), t("brown"), t("dark")], t("area"): [analysis["green"], analysis["yellow"], analysis["brown"], analysis["dark"]]}), hide_index=True, use_container_width=True)
 
     st.markdown(f"### {t('spot_analysis')}")
     display_table({t("parameter"): [t("spot_coverage"), t("spot_count"), t("spot_density"), t("largest_spot"), t("average_spot")], t("value"): [f"{format_number(spot_coverage)}%", format_count(analysis["spot_count"]), format_number(analysis["spot_density"]), f'{format_number(analysis["largest_spot_area"])} {t("pixels")}', f'{format_number(analysis["average_spot_area"])} {t("pixels")}']})
-    st.markdown(f"#### {t('spot_distribution')}")
-    display_table({t("parameter"): [t("region_1"), t("region_2"), t("region_3"), t("region_4")], t("value"): [f'{format_number(analysis[f"spot_region_{index}"])}%' for index in range(4)]})
     feature_columns = st.columns(3)
-    feature_sets = [(t("rgb_analysis"), [("R", analysis["mean_R"]), ("G", analysis["mean_G"]), ("B", analysis["mean_B"])]), (t("hsv_analysis"), [("H", analysis["mean_H"]), ("S", analysis["mean_S"]), ("V", analysis["mean_V"]), ("Std H", analysis["std_H"]), ("Std S", analysis["std_S"]), ("Std V", analysis["std_V"])]), (t("lab_analysis"), [("L", analysis["mean_L"]), ("A", analysis["mean_a"]), ("B", analysis["mean_b"])])]
+    feature_sets = [(t("rgb_analysis"), [("R", analysis["mean_R"]), ("G", analysis["mean_G"]), ("B", analysis["mean_B"])]), (t("hsv_analysis"), [("H", analysis["mean_H"]), ("S", analysis["mean_S"]), ("V", analysis["mean_V"])]), (t("lab_analysis"), [("L", analysis["mean_L"]), ("A", analysis["mean_a"]), ("B", analysis["mean_b"])])]
     for column, (heading, rows) in zip(feature_columns, feature_sets):
         with column:
             st.markdown(f"### {heading}")
@@ -466,19 +448,18 @@ if analysis:
     st.markdown(f"### {t('texture_analysis')}")
     texture_values = [analysis["texture_score"], analysis["glcm_contrast"], analysis["glcm_homogeneity"], analysis["glcm_energy"], analysis["glcm_correlation"]]
     display_table({t("feature"): [t("texture_score"), t("glcm_contrast"), t("glcm_homogeneity"), t("glcm_energy"), t("glcm_correlation")], t("value"): [format_number(value) for value in texture_values]})
-    regional_names = ["regional_green_std", "regional_yellow_std", "regional_brown_std", "regional_dark_std", "color_percentage_variance"]
-    regional_labels = [t("green"), t("yellow"), t("brown"), t("dark"), t("color_variance")]
-    st.markdown(f"### {t('regional_variation')}")
-    display_table({t("feature"): regional_labels, t("value"): [format_number(analysis[name]) for name in regional_names]})
 
+    interpretation = (f"Black/brown spots were detected on the banana surface. The detected spot coverage is {spot_coverage:.2f}%, which is above the configured threshold of {threshold:.2f}%. Based on this image-processing rule, the banana is classified as naturally ripened." if natural else f"Black/brown spots were detected at only {spot_coverage:.2f}%, which is below the configured threshold of {threshold:.2f}%. Based on this image-processing rule, the banana is classified as chemically/artificially ripened.")
+    if st.session_state.language == "mr":
+        interpretation = (f"केळीच्या पृष्ठभागावर काळे/तपकिरी डाग आढळले. डागांचे प्रमाण {spot_coverage:.2f}% आहे, जे {threshold:.2f}% या निश्चित मर्यादेपेक्षा जास्त आहे. या प्रतिमा-प्रक्रिया नियमावरून केळी नैसर्गिकरीत्या पिकलेली म्हणून वर्गीकृत केली आहे." if natural else f"काळे/तपकिरी डागांचे प्रमाण फक्त {spot_coverage:.2f}% आहे, जे {threshold:.2f}% या निश्चित मर्यादेपेक्षा कमी आहे. या प्रतिमा-प्रक्रिया नियमावरून केळी रासायनिक/कृत्रिमरीत्या पिकवलेली म्हणून वर्गीकृत केली आहे.")
     st.markdown(f"### {t('final_interpretation')}")
-    st.info(result["description"] if result else t("no_model"))
+    st.info(interpretation)
 
     st.divider()
     st.markdown(f"## {t('detailed_report')}")
     st.markdown(f"### {t('image_information')}")
     display_table({t("parameter"): [t("filename"), t("dimensions"), t("banana_detected_label")], t("value"): [analysis["filename"], f'{format_count(analysis["dimensions"][0])} × {format_count(analysis["dimensions"][1])} px', t("yes")]})
     st.markdown(f"### {t('classification')}")
-    display_table({t("parameter"): [t("classification"), t("spot_coverage"), t("spot_count"), t("prediction_confidence")], t("value"): [result_title, f"{format_number(spot_coverage)}%", format_count(analysis["spot_count"]), f"{float(result['confidence']) * 100:.1f}%" if result else t("unavailable")]})
+    display_table({t("parameter"): [t("classification"), t("spot_coverage"), t("threshold"), t("spot_count")], t("value"): [result_title, f"{format_number(spot_coverage)}%", f"{format_number(threshold)}%", format_count(analysis["spot_count"])]})
 
 render_dataset_evaluation()

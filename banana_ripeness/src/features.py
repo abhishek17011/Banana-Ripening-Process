@@ -2,32 +2,10 @@ import cv2
 from .image_processing import process_image
 from .color_analysis import extract_features
 
-COLOR_FEATURES = ["green_percentage", "yellow_percentage", "brown_percentage", "dark_percentage"]
-HSV_DISTRIBUTION_FEATURES = [
-	*(f"hue_bin_{index}" for index in range(8)),
-	*(f"saturation_bin_{index}" for index in range(4)),
-	*(f"brightness_bin_{index}" for index in range(4)),
-]
-REGIONAL_FEATURES = [
-	*(f"regional_{color}_std" for color in ("green", "yellow", "brown", "dark")),
-	*(f"spot_region_{index}" for index in range(4)),
-]
-FEATURE_NAMES = [
-	*COLOR_FEATURES,
-	"color_percentage_std", "color_percentage_variance",
-	*HSV_DISTRIBUTION_FEATURES,
-	"mean_R", "mean_G", "mean_B", "mean_H", "mean_S", "mean_V",
-	"std_H", "std_S", "std_V", "mean_L", "mean_a", "mean_b",
-	"brown_spot_percentage", "detected_spot_percentage", "spot_count", "spot_density", "largest_spot_area", "average_spot_area",
-	*REGIONAL_FEATURES,
-	"texture_score", "gradient_energy", "local_variance", "glcm_contrast",
-	"glcm_homogeneity", "glcm_energy", "glcm_correlation", "fruit_area", "fruit_coverage", "aspect_ratio",
-]
-
-
+FEATURE_NAMES=["green_percentage","yellow_percentage","brown_percentage","dark_percentage","mean_R","mean_G","mean_B","mean_H","mean_S","mean_V","mean_L","mean_a","mean_b","brown_spot_percentage","spot_count","spot_density","largest_spot_area","average_spot_area","texture_score","gradient_energy","local_variance","glcm_contrast","glcm_homogeneity","glcm_energy","glcm_correlation","fruit_area","fruit_coverage","aspect_ratio"]
 def extract_features_from_image(image):
  p=process_image(image); raw=extract_features(p["working"],p["hsv"],p["lab"],p["banana_mask"])
- result={"green_percentage":raw["green"],"yellow_percentage":raw["yellow"],"brown_percentage":raw["brown"],"dark_percentage":raw["dark"],"color_percentage_std":raw["color_percentage_std"]}
+ result={"green_percentage":raw["green"],"yellow_percentage":raw["yellow"],"brown_percentage":raw["brown"],"dark_percentage":raw["dark"]}
  result.update({name:raw[name] for name in FEATURE_NAMES if name not in result})
  return result,raw,p
 def extract_features_from_path(path):

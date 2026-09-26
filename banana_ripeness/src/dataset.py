@@ -2,7 +2,7 @@ from pathlib import Path
 import cv2
 import pandas as pd
 
-CLASS_NAMES=["natural","chemical"]
+CLASS_NAMES=["green","natural","chemical"]
 VALID_EXTENSIONS={".jpg",".jpeg",".png"}
 def scan_dataset(dataset_dir="dataset"):
  root=Path(dataset_dir); records=[]; invalid=[]; counts={name:0 for name in CLASS_NAMES}
