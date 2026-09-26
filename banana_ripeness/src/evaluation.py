@@ -1,5 +1,6 @@
 """Evaluate the existing image-processing ripening-method rule on labeled images."""
 
+import csv
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 
@@ -15,10 +16,6 @@ CLASS_NAMES = ("Natural", "Chemical / Artificial")
 CLASS_FOLDERS = {
     "Natural": ("natural",),
     "Chemical / Artificial": ("chemical", "artificial", "chemical_artificial"),
-}
-PSEUDO_CLASS_FOLDERS = {
-    "Natural": ("ripe", "overripe"),
-    "Chemical / Artificial": ("spoiled",),
 }
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
@@ -48,25 +45,30 @@ def evaluate_dataset(
     missing_classes: List[str] = []
     ground_truth_valid = False
     pseudo_labeled = False
+    manifest_path = root / "manifest.csv"
 
-    for class_name, folder_names in CLASS_FOLDERS.items():
-        folder = _find_folder(root, folder_names)
-        if folder is None:
-            missing_classes.append(class_name)
-            continue
-        ground_truth_valid = True
-        labeled_files.extend((path, class_name) for path in _iter_images(folder))
-
-    if not labeled_files:
+    if manifest_path.is_file():
+        with manifest_path.open("r", newline="", encoding="utf-8-sig") as manifest_file:
+            for row in csv.DictReader(manifest_file):
+                label = row.get("evaluation_label", "")
+                image_path = row.get("original_image_path", "")
+                if label not in CLASS_NAMES or not image_path:
+                    continue
+                path = Path(image_path)
+                if not path.is_absolute():
+                    path = (manifest_path.parent / path).resolve()
+                labeled_files.append((path, label))
         pseudo_labeled = True
-        for class_name, folder_names in PSEUDO_CLASS_FOLDERS.items():
-            folder = _find_folder(root, folder_names)
-            if folder is None:
-                continue
-            labeled_files.extend((path, class_name) for path in _iter_images(folder))
-
-    if labeled_files and not ground_truth_valid:
-        pseudo_labeled = True
+    else:
+        class_folders = {
+            class_name: _find_folder(root, folder_names)
+            for class_name, folder_names in CLASS_FOLDERS.items()
+        }
+        missing_classes = [name for name, folder in class_folders.items() if folder is None]
+        ground_truth_valid = not missing_classes
+        if ground_truth_valid:
+            for class_name, folder in class_folders.items():
+                labeled_files.extend((path, class_name) for path in _iter_images(folder))
 
     results: List[dict] = []
     skipped: List[dict] = []
@@ -113,9 +115,9 @@ def evaluate_dataset(
     matrix = confusion_matrix(actual_values, predicted_values, labels=list(CLASS_NAMES))
     correct = int(sum(actual == predicted for actual, predicted in zip(actual_values, predicted_values)))
     total_predictions = len(results)
-    accuracy = correct / total_predictions if total_predictions else 0.0
-    precision = recall = f1 = 0.0
+    accuracy = precision = recall = f1 = None
     if ground_truth_valid:
+        accuracy = correct / total_predictions if total_predictions else 0.0
         precision, recall, f1, _ = precision_recall_fscore_support(
             actual_values,
             predicted_values,
