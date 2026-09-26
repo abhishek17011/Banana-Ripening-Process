@@ -18,7 +18,7 @@ def main():
  for item in invalid: print("Ignored corrupted image:",item)
  if errors:
   for item in errors: print("ERROR:",item)
-  raise SystemExit("Training stopped: every class requires at least 10 valid real images.")
+  raise SystemExit("Training stopped: dataset/natural and dataset/chemical each require at least 10 valid, ground-truth labeled images.")
  for item in warnings_list: print("WARNING:",item)
  rows=[]
  for record in records:
@@ -26,7 +26,7 @@ def main():
    features,_,_=extract_features_from_path(record["filename"]); rows.append({"filename":record["filename"],"label":record["label"],**features})
   except Exception as exc: print("Ignored feature extraction failure:",record["filename"],exc)
  frame=pd.DataFrame(rows); OUTPUTS.mkdir(exist_ok=True); frame.to_csv(OUTPUTS/"banana_features.csv",index=False)
- if frame["label"].value_counts().min()<10: raise SystemExit("Training stopped after extraction: a class has fewer than 10 usable images.")
+ if frame["label"].value_counts().min()<10: raise SystemExit("Training stopped after extraction: each ground-truth class needs at least 10 usable images.")
  x=frame[FEATURE_NAMES]; y=frame["label"]
  # Held-out test is never used during selection; validation chooses the model.
  x_train_val,x_test,y_train_val,y_test=train_test_split(x,y,test_size=.15,stratify=y,random_state=42)
@@ -39,9 +39,9 @@ def main():
  comparison_df=pd.DataFrame(comparison); print("\nValidation comparison\n",comparison_df.to_string(index=False)); comparison_df.to_csv(OUTPUTS/"model_comparison.csv",index=False)
  winner=comparison_df.sort_values(["F1 Score","Accuracy"],ascending=False).iloc[0]; model_name=winner["Model"]; best=candidates[model_name]; best.fit(x_train_val,y_train_val)
  test_metrics=scores(best,x_test,y_test); print("\nHeld-out test metrics:",test_metrics)
- report=classification_report(y_test,best.predict(x_test),labels=range(3),target_names=[x.title() for x in CLASS_NAMES],zero_division=0)
+ report=classification_report(y_test,best.predict(x_test),labels=range(len(CLASS_NAMES)),target_names=[x.title() for x in CLASS_NAMES],zero_division=0)
  (OUTPUTS/"classification_report.txt").write_text(report+"\n\nTest metrics:\n"+json.dumps(test_metrics,indent=2),encoding="utf-8")
- fig,ax=plt.subplots(figsize=(7,5)); ConfusionMatrixDisplay.from_predictions(y_test,best.predict(x_test),labels=range(3),display_labels=[x.title() for x in CLASS_NAMES],cmap="YlGn",ax=ax,colorbar=False); fig.tight_layout(); fig.savefig(OUTPUTS/"confusion_matrix.png",dpi=150); plt.close(fig)
+ fig,ax=plt.subplots(figsize=(7,5)); ConfusionMatrixDisplay.from_predictions(y_test,best.predict(x_test),labels=range(len(CLASS_NAMES)),display_labels=[x.title() for x in CLASS_NAMES],cmap="YlGn",ax=ax,colorbar=False); fig.tight_layout(); fig.savefig(OUTPUTS/"confusion_matrix.png",dpi=150); plt.close(fig)
  if len(frame)>=125:
   cv=StratifiedKFold(n_splits=5,shuffle=True,random_state=42); cv_scores=cross_val_score(best,x,y,cv=cv,scoring="accuracy"); print(f"5-fold CV accuracy: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
  else: print("Cross-validation skipped: fewer than 125 images.")
