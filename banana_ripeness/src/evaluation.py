@@ -16,6 +16,10 @@ CLASS_FOLDERS = {
     "Natural": ("natural",),
     "Chemical / Artificial": ("chemical", "artificial", "chemical_artificial"),
 }
+PSEUDO_CLASS_FOLDERS = {
+    "Natural": ("ripe", "overripe"),
+    "Chemical / Artificial": ("spoiled",),
+}
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
@@ -38,16 +42,31 @@ def evaluate_dataset(
     dataset_dir: Union[str, Path],
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> dict:
-    """Process one image at a time and calculate metrics from real labels."""
+    """Process one image at a time and calculate metrics from real labels when available."""
     root = Path(dataset_dir)
     labeled_files: List[Tuple[Path, str]] = []
     missing_classes: List[str] = []
+    ground_truth_valid = False
+    pseudo_labeled = False
+
     for class_name, folder_names in CLASS_FOLDERS.items():
         folder = _find_folder(root, folder_names)
         if folder is None:
             missing_classes.append(class_name)
             continue
+        ground_truth_valid = True
         labeled_files.extend((path, class_name) for path in _iter_images(folder))
+
+    if not labeled_files:
+        pseudo_labeled = True
+        for class_name, folder_names in PSEUDO_CLASS_FOLDERS.items():
+            folder = _find_folder(root, folder_names)
+            if folder is None:
+                continue
+            labeled_files.extend((path, class_name) for path in _iter_images(folder))
+
+    if labeled_files and not ground_truth_valid:
+        pseudo_labeled = True
 
     results: List[dict] = []
     skipped: List[dict] = []
@@ -84,20 +103,27 @@ def evaluate_dataset(
             "missing_classes": missing_classes,
             "results": [],
             "skipped": skipped,
+            "ground_truth_valid": ground_truth_valid,
+            "pseudo_labeled": pseudo_labeled,
+            "metrics_valid": ground_truth_valid,
         }
 
     actual_values = [row["actual"] for row in results]
     predicted_values = [row["predicted"] for row in results]
     matrix = confusion_matrix(actual_values, predicted_values, labels=list(CLASS_NAMES))
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        actual_values,
-        predicted_values,
-        labels=list(CLASS_NAMES),
-        average="weighted",
-        zero_division=0,
-    )
     correct = int(sum(actual == predicted for actual, predicted in zip(actual_values, predicted_values)))
     total_predictions = len(results)
+    accuracy = correct / total_predictions if total_predictions else 0.0
+    precision = recall = f1 = 0.0
+    if ground_truth_valid:
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            actual_values,
+            predicted_values,
+            labels=list(CLASS_NAMES),
+            average="weighted",
+            zero_division=0,
+        )
+
     return {
         "available": True,
         "missing_classes": missing_classes,
@@ -107,9 +133,12 @@ def evaluate_dataset(
         "total_images": total_predictions,
         "correct_predictions": correct,
         "incorrect_predictions": total_predictions - correct,
-        "accuracy": correct / total_predictions,
+        "accuracy": accuracy,
         "precision": float(precision),
         "recall": float(recall),
         "f1": float(f1),
         "table": pd.DataFrame(results),
+        "ground_truth_valid": ground_truth_valid,
+        "pseudo_labeled": pseudo_labeled,
+        "metrics_valid": ground_truth_valid,
     }

@@ -117,6 +117,8 @@ TRANSLATIONS["en"].update({
     "evaluation_accuracy": "Accuracy", "evaluation_precision": "Precision", "evaluation_recall": "Recall",
     "evaluation_f1": "F1-score", "evaluation_confusion": "Confusion Matrix", "evaluation_actual": "Actual",
     "evaluation_predicted": "Predicted", "evaluation_skipped": "images skipped due to invalid or unsupported files.",
+    "ground_truth_required": "Independent ground-truth labels are required for valid confusion-matrix performance metrics.",
+    "pseudo_labeled_notice": "This project dataset is pseudo-labeled from the existing folder structure and is not independent ground truth.",
 })
 TRANSLATIONS["mr"].update({
     "segmentation_uncertain": "⚠️ केळीचे विभाजन अनिश्चित आहे. कृपया अधिक स्पष्ट फोटो अपलोड करा."
@@ -129,6 +131,8 @@ TRANSLATIONS["mr"].update({
     "evaluation_precision": "प्रिसिजन", "evaluation_recall": "रिकॉल", "evaluation_f1": "F1-स्कोअर",
     "evaluation_confusion": "गोंधळ मॅट्रिक्स", "evaluation_actual": "प्रत्यक्ष", "evaluation_predicted": "अंदाजित",
     "evaluation_skipped": "अवैध किंवा असमर्थित फाइल्समुळे प्रतिमा वगळल्या.",
+    "ground_truth_required": "वैध confusion-matrix मेट्रिक्ससाठी स्वतंत्र ground-truth लेबल आवश्यक आहेत.",
+    "pseudo_labeled_notice": "हा डेटासेट विद्यमान फोल्डर स्ट्रक्चरवरून pseudo-labeled आहे आणि स्वतंत्र ground truth नाही.",
 })
 
 if "language" not in st.session_state:
@@ -198,19 +202,24 @@ def render_dataset_evaluation():
     st.pyplot(figure, use_container_width=False)
     plt.close(figure)
 
-    metric_columns = st.columns(7)
-    metrics = [
-        (t("evaluation_total"), evaluation["total_images"]),
-        (t("evaluation_correct"), evaluation["correct_predictions"]),
-        (t("evaluation_incorrect"), evaluation["incorrect_predictions"]),
-        (t("evaluation_accuracy"), f'{evaluation["accuracy"] * 100:.2f}%'),
-        (t("evaluation_precision"), f'{evaluation["precision"] * 100:.2f}%'),
-        (t("evaluation_recall"), f'{evaluation["recall"] * 100:.2f}%'),
-        (t("evaluation_f1"), f'{evaluation["f1"] * 100:.2f}%'),
-    ]
-    for column, (label, value) in zip(metric_columns, metrics):
-        with column:
-            st.metric(label, value)
+    if evaluation.get("pseudo_labeled"):
+        st.warning(t("ground_truth_required"))
+        st.info(t("pseudo_labeled_notice"))
+
+    if evaluation.get("metrics_valid"):
+        metric_columns = st.columns(7)
+        metrics = [
+            (t("evaluation_total"), evaluation["total_images"]),
+            (t("evaluation_correct"), evaluation["correct_predictions"]),
+            (t("evaluation_incorrect"), evaluation["incorrect_predictions"]),
+            (t("evaluation_accuracy"), f'{evaluation["accuracy"] * 100:.2f}%'),
+            (t("evaluation_precision"), f'{evaluation["precision"] * 100:.2f}%'),
+            (t("evaluation_recall"), f'{evaluation["recall"] * 100:.2f}%'),
+            (t("evaluation_f1"), f'{evaluation["f1"] * 100:.2f}%'),
+        ]
+        for column, (label, value) in zip(metric_columns, metrics):
+            with column:
+                st.metric(label, value)
     if evaluation["skipped"]:
         st.warning(f'{len(evaluation["skipped"])} {t("evaluation_skipped")}')
 
